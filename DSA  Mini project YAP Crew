@@ -1,85 +1,193 @@
 #include <stdio.h>
 #include <stdlib.h>
 #include <string.h>
+#include <unistd.h> // For sleep
 
-typedef struct Account {
+// Color Definitions
+#define RESET   "\x1b[0m"
+#define RED     "\x1b[31m"
+#define GREEN   "\x1b[32m"
+#define BLUE    "\x1b[34m"
+#define YELLOW  "\x1b[33m"
+
+struct Account {
     int account_number;
     char name[50];
     float balance;
     struct Account* next;
-} Account;
+};
 
-typedef struct Transaction {
+struct Transaction {
     int account_number;
     float amount;
-    char type[10]; // Deposit or Withdraw
+    char type[10];
     struct Transaction* next;
-} Transaction;
+};
 
-typedef struct {
-    Transaction* front;
-    Transaction* rear;
-} TransactionQueue;
+struct TransactionQueue {
+    struct Transaction* front;
+    struct Transaction* rear;
+};
 
-void createAccount(Account** head) {
-    Account* newAccount = (Account*) malloc(sizeof(Account));
-    printf("Enter Account Number: ");
-    scanf("%d", &newAccount->account_number);
+#define ACCOUNT_FILE "accounts.dat"
+#define TRANSACTION_FILE "transactions.dat"
+
+// Helper Functions
+void saveAccounts(struct Account* head) {
+    FILE* file = fopen(ACCOUNT_FILE, "wb");
+    if (file == NULL) {
+        perror(RED "Error saving accounts" RESET);
+        return;
+    }
+    struct Account* temp = head;
+    while (temp) {
+        fwrite(temp, sizeof(struct Account), 1, file);
+        temp = temp->next;
+    }
+    fclose(file);
+}
+
+struct Account* loadAccounts() {
+    FILE* file = fopen(ACCOUNT_FILE, "rb");
+    if (file == NULL) {
+        return NULL; // File might not exist on first run
+    }
+    struct Account* head = NULL;
+    struct Account* temp = NULL;
+    struct Account* newAccount = NULL;
+
+    while (1) {
+        newAccount = (struct Account*)malloc(sizeof(struct Account));
+        if (fread(newAccount, sizeof(struct Account), 1, file) == 0) {
+            free(newAccount);
+            break;
+        }
+        newAccount->next = NULL;
+        if (head == NULL) {
+            head = newAccount;
+        } else {
+            temp->next = newAccount;
+        }
+        temp = newAccount;
+    }
+    fclose(file);
+    return head;
+}
+
+void saveTransactions(struct TransactionQueue* queue) {
+    FILE* file = fopen(TRANSACTION_FILE, "wb");
+    if (file == NULL) {
+        perror(RED "Error saving transactions" RESET);
+        return;
+    }
+    struct Transaction* temp = queue->front;
+    while (temp) {
+        fwrite(temp, sizeof(struct Transaction), 1, file);
+        temp = temp->next;
+    }
+    fclose(file);
+}
+
+void loadTransactions(struct TransactionQueue* queue) {
+    FILE* file = fopen(TRANSACTION_FILE, "rb");
+    if (file == NULL) {
+        return; // File might not exist on first run
+    }
+    struct Transaction* temp = NULL;
+    struct Transaction* newTransaction = NULL;
+
+    while (1) {
+        newTransaction = (struct Transaction*)malloc(sizeof(struct Transaction));
+        if (fread(newTransaction, sizeof(struct Transaction), 1, file) == 0) {
+            free(newTransaction);
+            break;
+        }
+        newTransaction->next = NULL;
+        if (queue->rear == NULL) {
+            queue->front = queue->rear = newTransaction;
+        } else {
+            queue->rear->next = newTransaction;
+            queue->rear = newTransaction;
+        }
+    }
+    fclose(file);
+}
+
+// Account Number Generator
+int generateAccountNumber() {
+    static int accountNumber = 1000; // Starts from 1000
+    return accountNumber++;
+}
+
+// Create Account
+struct Account* createAccount(struct Account* head) {
+    struct Account* newAccount = (struct Account*)malloc(sizeof(struct Account));
+    newAccount->account_number = generateAccountNumber();
+    printf(BLUE "Generated Account Number: %d\n" RESET, newAccount->account_number);
     printf("Enter Name: ");
     scanf("%s", newAccount->name);
     newAccount->balance = 0.0;
-    newAccount->next = *head;
-    *head = newAccount;
+    newAccount->next = head;
+    saveAccounts(newAccount);
+    printf(GREEN "Account created successfully!\n" RESET);
+    return newAccount;
 }
 
-void displayAccount(Account* head, int account_number) {
-    Account* temp = head;
-    while(temp != NULL && temp->account_number != account_number) {
+// Display Account
+void displayAccount(struct Account* head, int account_number) {
+    struct Account* temp = head;
+    while (temp != NULL && temp->account_number != account_number) {
         temp = temp->next;
     }
-    if(temp != NULL) {
+    if (temp != NULL) {
+        printf(GREEN "Account Details:\n" RESET);
         printf("Account Number: %d\n", temp->account_number);
         printf("Name: %s\n", temp->name);
         printf("Balance: %.2f\n", temp->balance);
     } else {
-        printf("Account not found!\n");
+        printf(RED "Account not found!\n" RESET);
     }
 }
 
-void deleteAccount(Account** head, int account_number) {
-    Account* temp = *head;
-    Account* prev = NULL;
+// Delete Account
+struct Account* deleteAccount(struct Account* head, int account_number) {
+    struct Account* temp = head;
+    struct Account* prev = NULL;
 
-    if(temp != NULL && temp->account_number == account_number) {
-        *head = temp->next;
+    if (temp != NULL && temp->account_number == account_number) {
+        head = temp->next;
         free(temp);
-        printf("Account deleted successfully.\n");
-        return;
+        saveAccounts(head);
+        printf(GREEN "Account deleted successfully.\n" RESET);
+        return head;
     }
 
-    while(temp != NULL && temp->account_number != account_number) {
+    while (temp != NULL && temp->account_number != account_number) {
         prev = temp;
         temp = temp->next;
     }
 
-    if(temp == NULL) {
-        printf("Account not found!\n");
-        return;
+    if (temp == NULL) {
+        printf(RED "Account not found!\n" RESET);
+        return head;
     }
 
     prev->next = temp->next;
     free(temp);
-    printf("Account deleted successfully.\n");
+    saveAccounts(head);
+    printf(GREEN "Account deleted successfully.\n" RESET);
+    return head;
 }
 
-void enqueue(TransactionQueue* q, int account_number, float amount, const char* type) {
-    Transaction* newTransaction = (Transaction*) malloc(sizeof(Transaction));
+// Enqueue Transaction
+void enqueue(struct TransactionQueue* q, int account_number, float amount, const char* type) {
+    struct Transaction* newTransaction = (struct Transaction*)malloc(sizeof(struct Transaction));
     newTransaction->account_number = account_number;
     newTransaction->amount = amount;
     strcpy(newTransaction->type, type);
     newTransaction->next = NULL;
 
-    if(q->rear == NULL) {
+    if (q->rear == NULL) {
         q->front = q->rear = newTransaction;
     } else {
         q->rear->next = newTransaction;
@@ -87,61 +195,98 @@ void enqueue(TransactionQueue* q, int account_number, float amount, const char* 
     }
 }
 
-void displayTransactions(TransactionQueue* q) {
-    Transaction* temp = q->front;
-    while(temp != NULL) {
+// Display Transactions
+void displayTransactions(struct TransactionQueue* q) {
+    struct Transaction* temp = q->front;
+    printf(BLUE "Transaction History:\n" RESET);
+    if (temp == NULL) {
+        printf(RED "No transactions to display.\n" RESET);
+        return;
+    }
+    while (temp != NULL) {
         printf("Account Number: %d, Amount: %.2f, Type: %s\n", temp->account_number, temp->amount, temp->type);
         temp = temp->next;
     }
 }
 
-void deposit(Account* head, int account_number, float amount, TransactionQueue* queue) {
-    Account* temp = head;
-    while(temp != NULL && temp->account_number != account_number) {
+// Deposit
+void deposit(struct Account* head, int account_number, float amount, struct TransactionQueue* queue) {
+    struct Account* temp = head;
+    if (amount <= 0) {
+        printf(RED "Invalid amount. Please enter a positive value.\n" RESET);
+        return;
+    }
+    while (temp != NULL && temp->account_number != account_number) {
         temp = temp->next;
     }
-    if(temp != NULL) {
+    if (temp != NULL) {
         temp->balance += amount;
-        printf("Deposit Successful. New Balance: %.2f\n", temp->balance);
+        printf(GREEN "Deposit Successful. New Balance: %.2f\n" RESET, temp->balance);
+        saveAccounts(head);
         enqueue(queue, account_number, amount, "Deposit");
+        saveTransactions(queue);
     } else {
-        printf("Account not found!\n");
+        printf(RED "Account not found!\n" RESET);
     }
 }
 
-void withdraw(Account* head, int account_number, float amount, TransactionQueue* queue) {
-    Account* temp = head;
-    while(temp != NULL && temp->account_number != account_number) {
+// Withdraw
+void withdraw(struct Account* head, int account_number, float amount, struct TransactionQueue* queue) {
+    struct Account* temp = head;
+    if (amount <= 0) {
+        printf(RED "Invalid amount. Please enter a positive value.\n" RESET);
+        return;
+    }
+    while (temp != NULL && temp->account_number != account_number) {
         temp = temp->next;
     }
-    if(temp != NULL) {
-        if(temp->balance >= amount) {
+    if (temp != NULL) {
+        if (temp->balance >= amount) {
             temp->balance -= amount;
-            printf("Withdrawal Successful. New Balance: %.2f\n", temp->balance);
+            printf(GREEN "Withdrawal Successful. New Balance: %.2f\n" RESET, temp->balance);
+            saveAccounts(head);
             enqueue(queue, account_number, amount, "Withdraw");
+            saveTransactions(queue);
         } else {
-            printf("Insufficient Balance!\n");
+            printf(RED "Insufficient Balance!\n" RESET);
         }
     } else {
-        printf("Account not found!\n");
+        printf(RED "Account not found!\n" RESET);
     }
 }
 
-int main() {
-    Account* head = NULL;
-    TransactionQueue queue = {NULL, NULL};
+// Main Menu Display
+void showMainMenu() {
+    printf(YELLOW "=====================================\n" RESET);
+    printf(BLUE "         BANK MANAGEMENT SYSTEM      \n" RESET);
+    printf(YELLOW "=====================================\n" RESET);
+    printf("1. Create Account\n");
+    printf("2. Display Account\n");
+    printf("3. Delete Account\n");
+    printf("4. Deposit\n");
+    printf("5. Withdraw\n");
+    printf("6. Display Transactions\n");
+    printf("7. Exit\n");
+    printf(YELLOW "=====================================\n" RESET);
+}
+
+// Main Menu
+void mainmenu() {
+    struct Account* head = loadAccounts();
+    struct TransactionQueue queue = {NULL, NULL};
+    loadTransactions(&queue);
 
     int choice, account_number;
     float amount;
 
-    while(1) {
-        printf("\n1. Create Account\n2. Display Account\n3. Delete Account\n4. Deposit\n5. Withdraw\n6. Display Transactions\n7. Exit\n");
+    while (1) {
+        showMainMenu();
         printf("Enter your choice: ");
         scanf("%d", &choice);
 
-        switch(choice) {
+        switch (choice) {
             case 1:
-                createAccount(&head);
+                head = createAccount(head);
                 break;
             case 2:
                 printf("Enter Account Number: ");
@@ -151,7 +296,7 @@ int main() {
             case 3:
                 printf("Enter Account Number: ");
                 scanf("%d", &account_number);
-                deleteAccount(&head, account_number);
+                head = deleteAccount(head, account_number);
                 break;
             case 4:
                 printf("Enter Account Number: ");
@@ -171,11 +316,27 @@ int main() {
                 displayTransactions(&queue);
                 break;
             case 7:
+                printf(GREEN "Thank you for using the Bank Management System. Goodbye!\n" RESET);
                 exit(0);
             default:
-                printf("Invalid choice!\n");
+                printf(RED "Invalid choice. Please try again.\n" RESET);
         }
-    }
 
+    }
+}
+
+// Main Function
+int main()
+{
+    char pass[10], password[10] = "YAPCrew";
+    printf("\n\n\t\tEnter the password to login: ");
+    scanf("%s", pass);
+    if (strcmp(pass, password) == 0) {
+        printf(GREEN "\nPassword Match!\nLOADING\n" RESET);
+
+        mainmenu();
+    } else {
+        printf(RED "Wrong Password. Exiting...\n" RESET);
+    }
     return 0;
 }
